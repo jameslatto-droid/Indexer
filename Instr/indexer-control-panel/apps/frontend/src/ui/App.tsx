@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -40,6 +41,24 @@ type IndexerStats = {
   throughput: { chunksPerSec: number; mbPerSec: number; etaSec: number };
 };
 
+type SearchChunk = {
+  chunkId: string;
+  path: string;
+  title: string;
+  section: string;
+  fileType: string;
+  modifiedAt: string;
+  score: number;
+  text: string;
+  highlights?: string[];
+};
+
+type ReasoningResult = {
+  answer: string;
+  citations: { chunkId: string; path: string; section: string; quote?: string }[];
+  notes?: string[];
+};
+
 function fmtBytes(n: number) {
   const units = ["B","KB","MB","GB","TB"];
   let i = 0;
@@ -58,7 +77,7 @@ function fmtSec(sec: number) {
 
 const API = "http://127.0.0.1:8787";
 
-export function App() {
+function DashboardPage() {
   const [roots, setRoots] = useState<string[]>([]);
   const [selection, setSelection] = useState<SelectionRules>({ include: [], exclude: [] });
   const [indexConfig, setIndexConfig] = useState({ type: "ivf_pq", compression: "pq8", dimension: 384 });
@@ -221,7 +240,7 @@ export function App() {
   }), [labels, vramHist]);
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-full flex flex-col">
       <header className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="text-lg font-semibold">Indexer Control Panel</div>
@@ -567,5 +586,225 @@ function SettingsModal({ config, onSave, onClose }: { config: any; onSave: (cfg:
         </div>
       </div>
     </div>
+  );
+}
+
+// --- Search & Reasoning routes ---
+function TopNav() {
+  const linkCls = ({ isActive }: { isActive: boolean }) => clsx("px-3 py-2 rounded text-sm", isActive ? "bg-slate-800 text-white" : "text-slate-300 hover:text-white");
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/80 backdrop-blur">
+      <div className="text-lg font-semibold">Indexer Control Panel</div>
+      <div className="flex items-center gap-2">
+        <NavLink to="/dashboard" className={linkCls}>Dashboard</NavLink>
+        <NavLink to="/search" className={linkCls}>Search</NavLink>
+        <NavLink to="/settings" className={linkCls}>Settings</NavLink>
+      </div>
+      <div className="text-xs text-slate-400">localhost</div>
+    </div>
+  );
+}
+
+function SearchRoute() {
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState("keyword");
+  const [topK, setTopK] = useState(20);
+  const [minScore, setMinScore] = useState(0.3);
+  const [results, setResults] = useState<SearchChunk[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const [reasoning, setReasoning] = useState<ReasoningResult | null>(null);
+  const [reasoningLoading, setReasoningLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const togglePin = (id: string) => {
+    setPinned(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      // Pinned implies selected
+      setSelected(sel => {
+        const s = new Set(sel);
+        s.add(id);
+        return s;
+      });
+      return next;
+    });
+  };
+
+  const runSearch = async () => {
+    setLoading(true); setError(null); setReasoning(null);
+    try {
+      const res = await fetch(`${API}/api/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, mode, topK, filters: { minScore } })
+      });
+      const data = await res.json();
+      setResults(data.chunks || []);
+      setSelected(new Set());
+      setPinned(new Set());
+    } catch (e: any) {
+      setError(e?.message || "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runReason = async () => {
+    const ids = pinned.size > 0 ? Array.from(pinned) : Array.from(selected);
+    setReasoningLoading(true); setError(null);
+    try {
+      const res = await fetch(`${API}/api/reason`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: query || "What are the key points?", chunkIds: ids, profile: "answer_strict", model: "llama3.2:latest", stream: false })
+      });
+      const data = await res.json();
+      setReasoning({ answer: data.answer, citations: data.citations || [], notes: data.notes });
+      if (!res.ok) setError("Reasoning returned an error");
+    } catch (e: any) {
+      setError(e?.message || "Reasoning failed");
+    } finally {
+      setReasoningLoading(false);
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/40 flex items-center gap-3">
+        <input
+          className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm"
+          placeholder="Search your corpus (semantic/keyword/hybrid)"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") runSearch(); }}
+        />
+        <select className="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm" value={mode} onChange={e => setMode(e.target.value)}>
+          <option value="semantic">Semantic</option>
+          <option value="keyword">Keyword</option>
+          <option value="hybrid">Hybrid</option>
+        </select>
+        <button className="btn" onClick={runSearch} disabled={loading}>{loading ? "Searching…" : "Search"}</button>
+        <button className="btn" onClick={runReason} disabled={reasoningLoading || (selected.size === 0 && pinned.size === 0)}>Generate Answer</button>
+      </div>
+
+      {error && <div className="px-4 py-2 text-sm text-amber-400">{error}</div>}
+
+      <div className="flex flex-1 min-h-0">
+        <aside className="w-[260px] border-r border-slate-800 p-3 space-y-3 bg-slate-950/40">
+          <div className="text-sm font-semibold">Filters</div>
+          <div className="text-xs text-slate-400">Min score</div>
+          <input type="range" min="0.5" max="0.95" step="0.01" value={minScore} onChange={e => setMinScore(parseFloat(e.target.value))} className="w-full" />
+          <div className="text-sm">{minScore.toFixed(2)}</div>
+          <div className="text-xs text-slate-400">Top K</div>
+          <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm" value={topK} onChange={e => setTopK(parseInt(e.target.value) || 10)} min={1} max={100} />
+          <div className="text-xs text-slate-500">Pinned chunks are always used.</div>
+        </aside>
+
+        <main className="flex-1 grid grid-cols-3 min-h-0">
+          <div className="col-span-2 border-r border-slate-800 p-4 space-y-3 overflow-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">Answer</div>
+              <div className="text-xs text-slate-400">Model: llama3.2 (mock)</div>
+            </div>
+            <div className="min-h-[180px] bg-slate-900/40 border border-slate-800 rounded p-3 text-sm whitespace-pre-wrap">
+              {reasoningLoading ? "Generating…" : (reasoning?.answer ?? "Run reasoning to see an answer with citations.")}
+            </div>
+            {reasoning?.citations?.length ? (
+              <div className="space-y-2">
+                <div className="text-xs text-slate-400 uppercase">Citations</div>
+                <div className="space-y-1 text-sm">
+                  {reasoning.citations.map((c, idx) => (
+                    <div key={`${c.chunkId}-${idx}`} className="bg-slate-900/40 border border-slate-800 rounded px-2 py-1">
+                      <div className="font-semibold">{c.chunkId}</div>
+                      <div className="text-xs text-slate-400">{c.path} — {c.section}</div>
+                      {c.quote && <div className="text-xs">“{c.quote}”</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="border-l border-slate-800 p-4 space-y-3 overflow-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">Results</div>
+              <div className="text-xs text-slate-400">{results.length} chunks</div>
+            </div>
+            <div className="space-y-3">
+              {results.map(chunk => {
+                const isSelected = selected.has(chunk.chunkId);
+                const isPinned = pinned.has(chunk.chunkId);
+                return (
+                  <div key={chunk.chunkId} className="bg-slate-900/40 border border-slate-800 rounded p-3 text-sm space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold truncate" title={chunk.title}>{chunk.title}</div>
+                      <div className="text-xs text-slate-400">{(chunk.score * 100).toFixed(1)}%</div>
+                    </div>
+                    <div className="text-xs text-slate-500 truncate" title={chunk.path}>{chunk.path}</div>
+                    <div className="text-xs text-slate-400">{chunk.section}</div>
+                    <div className="text-xs text-slate-300 line-clamp-3">{chunk.text}</div>
+                    <div className="flex items-center gap-2 pt-2">
+                      <label className="flex items-center gap-1 text-xs cursor-pointer">
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(chunk.chunkId)} /> Select
+                      </label>
+                      <button className={clsx("text-xs px-2 py-1 rounded border", isPinned ? "border-emerald-500 text-emerald-300" : "border-slate-700 text-slate-300")}
+                        onClick={() => togglePin(chunk.chunkId)}>{isPinned ? "Pinned" : "Pin"}</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function SettingsRoute() {
+  return (
+    <div className="h-full flex flex-col p-6 space-y-4">
+      <div className="text-lg font-semibold">Settings</div>
+      <div className="text-sm text-slate-300">Configure model, prompt profiles, and retrieval defaults. (Placeholder UI)</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="card p-3">
+          <div className="font-semibold mb-2">Model</div>
+          <div className="text-xs text-slate-400">llama3.2:latest (local)</div>
+        </div>
+        <div className="card p-3">
+          <div className="font-semibold mb-2">Prompt Profile</div>
+          <div className="text-xs text-slate-400">answer_strict</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Router Shell ---
+export function App() {
+  return (
+    <BrowserRouter>
+      <div className="h-screen flex flex-col bg-slate-950 text-slate-100">
+        <TopNav />
+        <div className="flex-1 min-h-0">
+          <Routes>
+            <Route path="/search" element={<SearchRoute />} />
+            <Route path="/settings" element={<SettingsRoute />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="*" element={<DashboardPage />} />
+          </Routes>
+        </div>
+      </div>
+    </BrowserRouter>
   );
 }

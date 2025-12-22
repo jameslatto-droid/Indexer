@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { Ollama } from "ollama";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +33,28 @@ const STATE = {
     throughput: { chunksPerSec: 0, mbPerSec: 0, etaSec: 0 }
   }
 };
+
+// --- Index & Ollama Setup ---
+const INDEX_DIR = "E:/AIIndex";
+const ollama = new Ollama({ host: "http://127.0.0.1:11434" });
+let indexData = null; // Will hold {config, embeddings: [{filePath, chunkIndex, embedding, text}]}
+
+function loadLatestIndex() {
+  try {
+    if (!fs.existsSync(INDEX_DIR)) return null;
+    const files = fs.readdirSync(INDEX_DIR).filter(f => f.startsWith("index_") && f.endsWith(".json")).sort().reverse();
+    if (!files.length) return null;
+    const indexPath = path.join(INDEX_DIR, files[0]);
+    const data = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
+    console.log(`Loaded index from ${indexPath}: ${data.embeddings?.length || 0} embeddings`);
+    return data;
+  } catch (err) {
+    console.error("Failed to load index:", err);
+    return null;
+  }
+}
+
+indexData = loadLatestIndex();
 
 // --- Indexer Worker Process Management ---
 let indexerWorker = null;
@@ -599,10 +622,275 @@ fastify.post("/api/index/rescan", async () => {
 fastify.get("/api/index/stats", async () => ({ ts: new Date().toISOString(), ...STATE.indexer }));
 fastify.get("/api/worker/status", async () => ({ ready: workerReady, pid: workerPid, hasWorker: !!indexerWorker }));
 
+// --- API: search (vector search + keyword fallback) ---
+function cosineSimilarity(a, b) {
+  if (!a || !b || a.length !== b.length) return 0;
+  let dot = 0, magA = 0, magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  const mag = Math.sqrt(magA) * Math.sqrt(magB);
+  return mag === 0 ? 0 : dot / mag;
+}
+
+function keywordScore(text, query) {
+  if (!text || !query) return 0;
+  const lowerText = text.toLowerCase();
+  const terms = query.toLowerCase().split(/\\s+/).filter(t => t.length > 0);
+  if (terms.length === 0) return 0;
+  let matches = 0;
+  for (const term of terms) {
+    if (lowerText.includes(term)) matches++;
+  }
+  return matches / terms.length;
+}
+
+async function getQueryEmbedding(text) {
+  // Call embedding service (same as indexer worker)
+  if (!text) return null;
+  const venvPython = path.join(__dirname, "..", "venv-gpu", "Scripts", "python.exe");
+  const embeddingScript = path.join(__dirname, "embedding-service.py");
+  try {
+    const result = execSync(`"${venvPython}" "${embeddingScript}" "${text.replaceAll('"', '\\"')}"`, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, timeout: 30000 });
+    const embedding = JSON.parse(result.trim());
+    if (!Array.isArray(embedding) || embedding.length === 0) {
+      console.error("Invalid embedding format from service");
+      return null;
+    }
+    return embedding;
+  } catch (err) {
+    console.error("Failed to get query embedding:", err.message);
+    return null;
+  }
+}
+
+function semanticSearch(queryEmbed, topK, minScore) {
+  if (!indexData || !indexData.embeddings || !queryEmbed) return [];
+  const scored = indexData.embeddings.map((item, idx) => ({
+    ...item,
+    chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
+    score: cosineSimilarity(queryEmbed, item.embedding)
+  })).filter(x => x.score >= minScore);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK);
+}
+
+function keywordSearch(query, topK, minScore) {
+  if (!indexData || !indexData.embeddings) return [];
+  const scored = indexData.embeddings.map((item, idx) => ({
+    ...item,
+    chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
+    score: keywordScore(item.text, query)
+  })).filter(x => x.score >= minScore);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK);
+}
+
+function hybridSearch(queryEmbed, query, topK, minScore) {
+  if (!indexData || !indexData.embeddings) return [];
+  const scored = indexData.embeddings.map((item, idx) => {
+    const semScore = cosineSimilarity(queryEmbed, item.embedding);
+    const kwScore = keywordScore(item.text, query);
+    return {
+      ...item,
+      chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
+      score: 0.7 * semScore + 0.3 * kwScore
+    };
+  }).filter(x => x.score >= minScore);
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK);
+}
+
+fastify.post("/api/search", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const query = body.query || "";
+    const mode = body.mode || "keyword";
+    const topK = Math.min(100, Math.max(1, body.topK || 20));
+    const minScore = body.filters?.minScore ?? 0.3;
+
+    if (!indexData || !indexData.embeddings || indexData.embeddings.length === 0) {
+      return { queryId: `q_${Date.now()}`, chunks: [], error: "No index loaded" };
+    }
+
+    // For now, only support keyword search (semantic disabled due to encoding issues with embedding service)
+    let results = [];
+    if (mode === "keyword") {
+      results = keywordSearch(query, topK, minScore);
+    } else {
+      // Fall back to keyword for semantic/hybrid until embedding service is fixed
+      results = keywordSearch(query, topK, minScore);
+    }
+
+    const chunks = results.map(r => ({
+      chunkId: r.chunkId,
+      path: r.filePath,
+      title: path.basename(r.filePath),
+      section: `Chunk ${r.chunkIndex}`,
+      fileType: path.extname(r.filePath).slice(1),
+      modifiedAt: new Date().toISOString(),
+      score: r.score,
+      text: (r.text || "").slice(0, 500),
+      highlights: []
+    }));
+
+    return { queryId: `q_${Date.now()}`, chunks };
+  } catch (err) {
+    req.log.error("Search error:", err);
+    return reply.code(500).send({ error: "Search failed", details: err.message });
+  }
+});
+
+// --- API: reason (Ollama-based RAG) ---
+const PROMPT_PROFILES = {
+  answer_strict: {
+    system: "You are a precise assistant. Answer the user's question based ONLY on the provided context chunks. Cite chunk IDs for every claim. If the context doesn't contain the answer, say \"Insufficient evidence.\"",
+    template: (question, chunks) => `Question: ${question}\n\nContext:\n${chunks.map((c, i) => `[${c.chunkId}] ${c.text}`).join("\n\n")}\n\nAnswer (cite chunk IDs):`
+  },
+  summarize: {
+    system: "You are a summarization assistant. Provide a concise summary of the given context.",
+    template: (question, chunks) => `Summarize the following content:\n\n${chunks.map(c => c.text).join("\n\n")}`
+  }
+};
+
+fastify.post("/api/reason", async (req, reply) => {
+  const body = req.body || {};
+  const question = body.question || "What are the key points?";
+  const chunkIds = Array.isArray(body.chunkIds) ? body.chunkIds : [];
+  const profile = body.profile || "answer_strict";
+  const model = body.model || "llama3.2:latest";
+  const stream = body.stream ?? false;
+
+  if (!indexData || !indexData.embeddings) {
+    return reply.code(500).send({ error: "No index loaded" });
+  }
+
+  if (chunkIds.length === 0) {
+    return {
+      answer: "No chunks selected. Please run a search and select relevant chunks first.",
+      citations: [],
+      notes: ["No chunks provided"]
+    };
+  }
+
+  // Find chunks
+  const chunks = chunkIds.map(id => indexData.embeddings.find(e => `chunk_${e.filePath}_${e.chunkIndex}` === id)).filter(Boolean);
+  if (chunks.length === 0) {
+    return {
+      answer: "Selected chunks not found in index.",
+      citations: [],
+      notes: ["Chunks not found"]
+    };
+  }
+
+  // Build prompt
+  const promptConfig = PROMPT_PROFILES[profile] || PROMPT_PROFILES.answer_strict;
+  const prompt = promptConfig.template(question, chunks);
+
+  try {
+    const response = await ollama.generate({
+      model,
+      prompt,
+      system: promptConfig.system,
+      stream: false
+    });
+
+    const answer = response.response || "(No response from model)";
+    const citations = chunks.slice(0, 5).map(c => ({
+      chunkId: `chunk_${c.filePath}_${c.chunkIndex}`,
+      path: c.filePath,
+      section: `Chunk ${c.chunkIndex}`,
+      quote: (c.text || "").slice(0, 100)
+    }));
+
+    return {
+      answer,
+      citations,
+      notes: [`Used ${chunks.length} chunks`, `Model: ${model}`, `Profile: ${profile}`]
+    };
+  } catch (err) {
+    req.log.error("Ollama error:", err);
+    return reply.code(500).send({ error: "Ollama request failed", details: err.message });
+  }
+});
+
 // --- WebSocket stream ---
 fastify.get("/ws", { websocket: true }, (connection, req) => {
   const send = (msg) => connection.socket.send(JSON.stringify(msg));
   send({ type: "hello", payload: { ok: true, ts: new Date().toISOString() } });
+});
+
+// --- WebSocket: reasoning stream (Ollama streaming) ---
+fastify.get("/ws_reason", { websocket: true }, (connection, req) => {
+  const send = (msg) => connection.socket.send(JSON.stringify(msg));
+  
+  connection.socket.on("message", async (raw) => {
+    let data = null;
+    try { data = JSON.parse(raw.toString()); } catch {}
+    
+    if (data?.type === "reason_start") {
+      const question = data.payload?.question || "What are the key points?";
+      const chunkIds = Array.isArray(data.payload?.chunkIds) ? data.payload.chunkIds : [];
+      const profile = data.payload?.profile || "answer_strict";
+      const model = data.payload?.model || "llama3.2:latest";
+
+      if (!indexData || !indexData.embeddings) {
+        send({ type: "reason_error", payload: { error: "No index loaded" } });
+        return;
+      }
+
+      if (chunkIds.length === 0) {
+        send({ type: "reason_token", payload: { text: "No chunks selected." } });
+        send({ type: "reason_done", payload: { answer: "No chunks selected.", citations: [] } });
+        return;
+      }
+
+      // Find chunks
+      const chunks = chunkIds.map(id => indexData.embeddings.find(e => `chunk_${e.filePath}_${e.chunkIndex}` === id)).filter(Boolean);
+      if (chunks.length === 0) {
+        send({ type: "reason_token", payload: { text: "Selected chunks not found." } });
+        send({ type: "reason_done", payload: { answer: "Selected chunks not found.", citations: [] } });
+        return;
+      }
+
+      // Build prompt
+      const promptConfig = PROMPT_PROFILES[profile] || PROMPT_PROFILES.answer_strict;
+      const prompt = promptConfig.template(question, chunks);
+
+      try {
+        const stream = await ollama.generate({
+          model,
+          prompt,
+          system: promptConfig.system,
+          stream: true
+        });
+
+        let fullAnswer = "";
+        for await (const part of stream) {
+          if (part.response) {
+            fullAnswer += part.response;
+            send({ type: "reason_token", payload: { text: part.response } });
+          }
+        }
+
+        const citations = chunks.slice(0, 5).map(c => ({
+          chunkId: `chunk_${c.filePath}_${c.chunkIndex}`,
+          path: c.filePath,
+          section: `Chunk ${c.chunkIndex}`,
+          quote: (c.text || "").slice(0, 100)
+        }));
+
+        send({ type: "reason_done", payload: { answer: fullAnswer, citations } });
+      } catch (err) {
+        console.error("Ollama streaming error:", err);
+        send({ type: "reason_error", payload: { error: "Ollama request failed", details: err.message } });
+      }
+    }
+  });
+  
+  connection.socket.on("close", () => {});
 });
 
 function systemStatsMock() {

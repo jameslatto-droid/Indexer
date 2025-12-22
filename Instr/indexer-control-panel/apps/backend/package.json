@@ -8,9 +8,10 @@
     "start": "node src/server.mjs"
   },
   "dependencies": {
-    "fastify": "^4.28.1",
     "@fastify/cors": "^8.5.0",
     "@fastify/websocket": "^8.3.1",
+    "fastify": "^4.28.1",
+    "ollama": "^0.6.3",
     "zod": "^3.23.8"
   }
 }
