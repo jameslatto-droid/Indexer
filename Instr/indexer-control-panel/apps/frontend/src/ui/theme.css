@@ -1,0 +1,4 @@
+.card { @apply bg-slate-900/40 border border-slate-800 rounded-2xl p-3 shadow-sm; }
+.btn { @apply text-sm px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700; }
+.btn-danger { @apply bg-rose-800/70 hover:bg-rose-700 border-rose-700; }
+.btn-xs { @apply text-xs px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700; }

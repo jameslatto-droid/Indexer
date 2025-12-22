@@ -1,0 +1,50 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log
+pnpm-debug.log
+
+# Builds / dist
+/dist/
+/build/
+/.next/
+/out/
+/.tmp/
+/tmp/
+/temp/
+
+# Logs
+*.log
+server.log
+
+# Env
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+venv-*/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+
+# Tooling caches
+/.parcel-cache/
+/.sass-cache/
+/.eslintcache
+/.cache/
+
+# IDE/editor
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+
+# Package artifacts
+*.egg-info/
+pip-wheel-metadata/

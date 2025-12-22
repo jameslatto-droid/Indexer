@@ -1,0 +1,7 @@
+@import './ui/theme.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
