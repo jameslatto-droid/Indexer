@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const PYTHON_EXE = process.env.PYTHON_EXE || 'python';
+const EMBEDDING_DEVICE = process.env.EMBEDDING_DEVICE || 'cuda';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Allow overriding the index storage location via env var (e.g. INDEX_DIR=E:\\AIIndex)
@@ -102,39 +103,48 @@ function initEmbeddingService() {
   return new Promise((resolve, reject) => {
     const pythonScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'embedding-service.py');
     
-    embeddingService = spawn(PYTHON_EXE, [pythonScript, '--model', 'all-MiniLM-L6-v2', '--device', 'cuda'], {
+    // Try CUDA first, will fallback to CPU in Python
+    embeddingService = spawn(PYTHON_EXE, [pythonScript, '--model', 'all-MiniLM-L6-v2', '--device', EMBEDDING_DEVICE], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
     // Avoid MaxListeners warnings when we attach per-request listeners
-    embeddingService.stdout.setMaxListeners(0);
-    embeddingService.stderr.setMaxListeners(0);
+    if (embeddingService.stdout) embeddingService.stdout.setMaxListeners(0);
+    if (embeddingService.stderr) embeddingService.stderr.setMaxListeners(0);
     
     let loadedReceived = false;
+    let stderrOutput = '';
+    let timeout = setTimeout(() => {
+      if (!loadedReceived) {
+        console.error('[embedding service] timeout waiting for "loaded" after 120 seconds');
+        embeddingService?.kill();
+        reject(new Error('Embedding service startup timeout'));
+      }
+    }, 120000); // 2 minutes for model loading
     
-    embeddingService.stderr.on('data', (data) => {
+    embeddingService.stderr?.on('data', (data) => {
       const msg = data.toString().trim();
+      stderrOutput += msg + '\n';
+      if (msg) console.log('[embedding service stderr]', msg);
       if (msg.includes('loaded')) {
+        clearTimeout(timeout);
         loadedReceived = true;
         embeddingEnabled = true;
         resolve();
       }
     });
     
-    embeddingService.on('error', reject);
+    embeddingService.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
     embeddingService.on('exit', (code) => {
+      clearTimeout(timeout);
       if (!loadedReceived) {
-        reject(new Error(`Embedding service failed to start (exit code ${code})`));
+        console.error('[embedding service] exited with code', code, 'stderr:', stderrOutput);
+        reject(new Error(`Embedding service failed to start (exit code ${code}). stderr: ${stderrOutput}`));
       }
     });
-    
-    // Timeout to prevent hanging
-    setTimeout(() => {
-      if (!loadedReceived) {
-        embeddingService?.kill();
-        reject(new Error('Embedding service startup timeout'));
-      }
-    }, 30000);
   });
 }
 
@@ -154,9 +164,11 @@ function embedChunks(chunks) {
     let settled = false;
 
     const cleanup = () => {
-      embeddingService.stdout.off('data', onData);
-      embeddingService.stdout.off('error', onError);
-      embeddingService.stdout.off('end', onEnd);
+      if (embeddingService?.stdout) {
+        embeddingService.stdout.off('data', onData);
+        embeddingService.stdout.off('error', onError);
+        embeddingService.stdout.off('end', onEnd);
+      }
     };
 
     const tryParse = () => {
@@ -170,6 +182,7 @@ function embedChunks(chunks) {
         settled = true;
         cleanup();
         if (response.error) {
+          console.error('[embedChunks] Python service error:', response.error, response.traceback ? '\n' + response.traceback : '');
           reject(new Error(response.error));
         } else {
           resolve(response);
@@ -211,9 +224,14 @@ function embedChunks(chunks) {
       }
     };
 
-    embeddingService.stdout.on('data', onData);
-    embeddingService.stdout.once('end', onEnd);
-    embeddingService.stdout.once('error', onError);
+    if (embeddingService?.stdout) {
+      embeddingService.stdout.on('data', onData);
+      embeddingService.stdout.once('end', onEnd);
+      embeddingService.stdout.once('error', onError);
+    } else {
+      reject(new Error('Embedding service stdout not available'));
+      return;
+    }
     // Failsafe: if no response in 30s, reject to avoid hanging
     const timer = setTimeout(() => {
       if (!settled) {
@@ -254,6 +272,7 @@ async function processPendingEmbeddings() {
         embeddingsStore.push({
           filePath: chunk.filePath,
           chunkIndex: chunk.chunkIndex,
+          text: chunk.text,
           embedding
         });
       }
@@ -262,7 +281,7 @@ async function processPendingEmbeddings() {
     STATE.embeddingsPending = Math.max(0, STATE.embeddingsPending - result.count);
     sendUpdate();
   } catch (e) {
-    console.error('Embedding error:', e.message);
+    console.error('Embedding error:', e.message, e.stack);
     // Don't fail entire indexing on embedding errors
   }
 }
@@ -346,38 +365,63 @@ function matchesGlob(filePath, pattern) {
  * Process file: extract text chunks and queue for GPU embedding
  */
 async function processFile(filePath) {
-  // Simulate processing time (100-500ms per file)
-  const delay = 100 + Math.random() * 400;
-  await new Promise(resolve => setTimeout(resolve, delay));
-  
   try {
     const stat = await fs.promises.stat(filePath);
+    const ext = path.extname(filePath).toLowerCase();
     
-    // Estimate chunk generation (avg 50-200 chunks per file based on size)
-    const sizeKB = stat.size / 1024;
-    const chunksEstimate = Math.ceil(sizeKB / 10) + Math.round(Math.random() * 30);
+    let text = '';
+    
+    // Extract text based on file type
+    if (['.txt', '.md', '.mjs', '.js', '.py', '.json', '.yaml', '.yml', '.csv', '.html', '.css', '.tsx', '.ts', '.jsx'].includes(ext)) {
+      try {
+        text = await fs.promises.readFile(filePath, 'utf-8');
+      } catch (e) {
+        console.warn(`Could not read file as text: ${filePath}`, e.message);
+        text = '';
+      }
+    }
+    
+    if (!text || text.trim().length === 0) {
+      STATE.filesProcessed++;
+      STATE.bytesProcessed += stat.size;
+      return { success: true, chunks: 0 };
+    }
+    
+    // Split into chunks (roughly 500 chars per chunk with overlap)
+    const CHUNK_SIZE = 500;
+    const CHUNK_OVERLAP = 100;
+    const chunks = [];
+    
+    for (let i = 0; i < text.length; i += CHUNK_SIZE - CHUNK_OVERLAP) {
+      const end = Math.min(i + CHUNK_SIZE, text.length);
+      const chunk = text.substring(i, end).trim();
+      if (chunk.length > 50) { // Only keep meaningful chunks
+        chunks.push(chunk);
+      }
+      if (end >= text.length) break;
+    }
     
     STATE.filesProcessed++;
     STATE.bytesProcessed += stat.size;
-    STATE.chunksGenerated += chunksEstimate;
+    STATE.chunksGenerated += chunks.length;
     
     // Queue chunks for GPU embedding with metadata
-    for (let i = 0; i < chunksEstimate; i++) {
+    for (let i = 0; i < chunks.length; i++) {
       embeddingBuffer.push({
         filePath: filePath,
         chunkIndex: i,
-        text: `Chunk ${i} from ${path.basename(filePath)}: Lorem ipsum dolor sit amet...`
+        text: chunks[i]
       });
     }
     
-    STATE.embeddingsPending += chunksEstimate;
+    STATE.embeddingsPending += chunks.length;
     
     // Process pending embeddings if buffer is full
     if (embeddingBuffer.length >= BATCH_SIZE) {
       await processPendingEmbeddings();
     }
     
-    return { success: true, chunks: chunksEstimate };
+    return { success: true, chunks: chunks.length };
   } catch (e) {
     STATE.filesFailed++;
     return { success: false, error: e.message };

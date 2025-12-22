@@ -38,6 +38,7 @@ const STATE = {
 const INDEX_DIR = "E:/AIIndex";
 const ollama = new Ollama({ host: "http://127.0.0.1:11434" });
 let indexData = null; // Will hold {config, embeddings: [{filePath, chunkIndex, embedding, text}]}
+const EMBEDDING_DEVICE = process.env.EMBEDDING_DEVICE || "cuda";
 
 function loadLatestIndex() {
   try {
@@ -648,18 +649,55 @@ function keywordScore(text, query) {
 }
 
 async function getQueryEmbedding(text) {
-  // Call embedding service (same as indexer worker)
+  // Call embedding service via subprocess with JSON input
   if (!text) return null;
   const venvPython = path.join(__dirname, "..", "venv-gpu", "Scripts", "python.exe");
   const embeddingScript = path.join(__dirname, "embedding-service.py");
   try {
-    const result = execSync(`"${venvPython}" "${embeddingScript}" "${text.replaceAll('"', '\\"')}"`, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, timeout: 30000 });
-    const embedding = JSON.parse(result.trim());
-    if (!Array.isArray(embedding) || embedding.length === 0) {
-      console.error("Invalid embedding format from service");
-      return null;
-    }
-    return embedding;
+    const { spawn } = require('child_process');
+    return new Promise((resolve, reject) => {
+      const service = spawn(venvPython, [embeddingScript, '--device', EMBEDDING_DEVICE]);
+      let output = '';
+      let error = '';
+      
+      service.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+      
+      service.stderr.on('data', (data) => {
+        error += data.toString();
+      });
+      
+      service.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`Embedding service exited with code ${code}: ${error}`));
+          return;
+        }
+        try {
+          const result = JSON.parse(output.trim());
+          if (result.embeddings && Array.isArray(result.embeddings) && result.embeddings.length > 0) {
+            resolve(result.embeddings[0]);
+          } else {
+            reject(new Error('Invalid embedding response'));
+          }
+        } catch (e) {
+          reject(new Error(`Failed to parse embedding: ${e.message}`));
+        }
+      });
+      
+      service.on('error', reject);
+      
+      // Send request to service
+      const request = JSON.stringify({ chunks: [{ filePath: 'query', chunkIndex: 0, text }] });
+      service.stdin.write(request + '\n');
+      service.stdin.end();
+      
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        service.kill();
+        reject(new Error('Embedding service timeout'));
+      }, 60000);
+    });
   } catch (err) {
     console.error("Failed to get query embedding:", err.message);
     return null;
@@ -668,22 +706,37 @@ async function getQueryEmbedding(text) {
 
 function semanticSearch(queryEmbed, topK, minScore) {
   if (!indexData || !indexData.embeddings || !queryEmbed) return [];
-  const scored = indexData.embeddings.map((item, idx) => ({
-    ...item,
-    chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
-    score: cosineSimilarity(queryEmbed, item.embedding)
-  })).filter(x => x.score >= minScore);
+  const scored = indexData.embeddings.map((item, idx) => {
+    try {
+      return {
+        ...item,
+        chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
+        score: cosineSimilarity(queryEmbed, item.embedding)
+      };
+    } catch (e) {
+      console.error(`Error in semantic search for item ${idx}:`, e.message);
+      return { ...item, chunkId: `chunk_${item.filePath}_${item.chunkIndex}`, score: 0 };
+    }
+  }).filter(x => x.score >= minScore);
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, topK);
 }
 
 function keywordSearch(query, topK, minScore) {
   if (!indexData || !indexData.embeddings) return [];
-  const scored = indexData.embeddings.map((item, idx) => ({
-    ...item,
-    chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
-    score: keywordScore(item.text, query)
-  })).filter(x => x.score >= minScore);
+  const scored = indexData.embeddings.map((item, idx) => {
+    try {
+      const text = item.text || "";
+      return {
+        ...item,
+        chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
+        score: keywordScore(text, query)
+      };
+    } catch (e) {
+      console.error(`Error scoring item ${idx}:`, e.message);
+      return { ...item, chunkId: `chunk_${item.filePath}_${item.chunkIndex}`, score: 0 };
+    }
+  }).filter(x => x.score >= minScore);
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, topK);
 }
@@ -691,13 +744,19 @@ function keywordSearch(query, topK, minScore) {
 function hybridSearch(queryEmbed, query, topK, minScore) {
   if (!indexData || !indexData.embeddings) return [];
   const scored = indexData.embeddings.map((item, idx) => {
-    const semScore = cosineSimilarity(queryEmbed, item.embedding);
-    const kwScore = keywordScore(item.text, query);
-    return {
-      ...item,
-      chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
-      score: 0.7 * semScore + 0.3 * kwScore
-    };
+    try {
+      const semScore = cosineSimilarity(queryEmbed, item.embedding);
+      const text = item.text || "";
+      const kwScore = keywordScore(text, query);
+      return {
+        ...item,
+        chunkId: `chunk_${item.filePath}_${item.chunkIndex}`,
+        score: 0.7 * semScore + 0.3 * kwScore
+      };
+    } catch (e) {
+      console.error(`Error in hybrid search for item ${idx}:`, e.message);
+      return { ...item, chunkId: `chunk_${item.filePath}_${item.chunkIndex}`, score: 0 };
+    }
   }).filter(x => x.score >= minScore);
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, topK);
@@ -715,12 +774,39 @@ fastify.post("/api/search", async (req, reply) => {
       return { queryId: `q_${Date.now()}`, chunks: [], error: "No index loaded" };
     }
 
-    // For now, only support keyword search (semantic disabled due to encoding issues with embedding service)
     let results = [];
-    if (mode === "keyword") {
-      results = keywordSearch(query, topK, minScore);
+    
+    if (mode === "semantic") {
+      // Get embedding for query
+      const queryEmbed = await getQueryEmbedding(query);
+      if (queryEmbed) {
+        results = semanticSearch(queryEmbed, topK, minScore);
+      } else {
+        console.warn("Failed to get query embedding, falling back to keyword search");
+        results = keywordSearch(query, topK, minScore);
+      }
+    } else if (mode === "hybrid") {
+      // Hybrid: combine keyword and semantic
+      const keyResults = keywordSearch(query, topK, minScore);
+      const queryEmbed = await getQueryEmbedding(query);
+      const semResults = queryEmbed ? semanticSearch(queryEmbed, topK, minScore) : [];
+      
+      // Merge and score (simple combination)
+      const merged = new Map();
+      for (const r of keyResults) {
+        merged.set(r.chunkId, { ...r, score: r.score });
+      }
+      for (const r of semResults) {
+        if (merged.has(r.chunkId)) {
+          const existing = merged.get(r.chunkId);
+          merged.set(r.chunkId, { ...r, score: (existing.score + r.score) / 2 });
+        } else {
+          merged.set(r.chunkId, r);
+        }
+      }
+      results = Array.from(merged.values()).sort((a, b) => b.score - a.score).slice(0, topK);
     } else {
-      // Fall back to keyword for semantic/hybrid until embedding service is fixed
+      // Default to keyword
       results = keywordSearch(query, topK, minScore);
     }
 
@@ -760,7 +846,7 @@ fastify.post("/api/reason", async (req, reply) => {
   const question = body.question || "What are the key points?";
   const chunkIds = Array.isArray(body.chunkIds) ? body.chunkIds : [];
   const profile = body.profile || "answer_strict";
-  const model = body.model || "llama3.2:latest";
+  const model = body.model || "llama3.1:8b-instruct-q4_K_M";
   const stream = body.stream ?? false;
 
   if (!indexData || !indexData.embeddings) {
@@ -834,7 +920,7 @@ fastify.get("/ws_reason", { websocket: true }, (connection, req) => {
       const question = data.payload?.question || "What are the key points?";
       const chunkIds = Array.isArray(data.payload?.chunkIds) ? data.payload.chunkIds : [];
       const profile = data.payload?.profile || "answer_strict";
-      const model = data.payload?.model || "llama3.2:latest";
+      const model = data.payload?.model || "llama3.1:8b-instruct-q4_K_M";
 
       if (!indexData || !indexData.embeddings) {
         send({ type: "reason_error", payload: { error: "No index loaded" } });
