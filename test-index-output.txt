@@ -1,0 +1,19 @@
+[test] spawned indexer worker, waiting for ready...
+[2025-12-22T20:58:19.046Z] [worker message] {"type":"ready"}
+[test] worker ready, sending start command
+[worker stdout] [initEmbeddingService] pythonScript: E:\Git\Indexing\Instr\indexer-control-panel\apps\backend\src\embedding-service.py
+[worker stdout] [initEmbeddingService] PYTHON_EXE: E:\Git\Indexing\Instr\indexer-control-panel\apps\backend\venv-gpu\Scripts\python.exe
+[worker stdout] [initEmbeddingService] spawned process pid: 31668
+[worker stdout] [embedding service stderr RAW] "{\"type\": \"ready\", \"model\": \"all-MiniLM-L6-v2\", \"device\": \"cpu\"}\r\n"
+[worker stdout] [embedding service stderr PARSED] {"type": "ready", "model": "all-MiniLM-L6-v2", "device": "cpu"}
+[worker stdout] [embedding service stderr RAW] "{\"type\": \"loaded\", \"device\": \"cpu\"}\r\n"
+[2025-12-22T20:58:26.453Z] [worker message] {"type":"log","message":"GPU embedding service initialized"}
+[worker stdout] [embedding service stderr PARSED] {"type": "loaded", "device": "cpu"}
+[embedding service] received "loaded" message, resolving
+[worker stdout] [indexer] derived roots: [ 'E:/Git/Indexing/Instr/indexer-control-panel/' ]
+[worker stdout] [indexer] scanning root: E:/Git/Indexing/Instr/indexer-control-panel/
+[worker stdout] [indexer] total files collected: 24
+[2025-12-22T20:58:26.459Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 0/24 files","files":{"queued":24,"processed":0,"failed":0},"bytesProcessed":0,"chunks":{"generated":0,"embedded":0},"embeddingsPend
+[2025-12-22T20:58:26.657Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 1/24 files","files":{"queued":24,"processed":1,"failed":0},"bytesProcessed":23406,"chunks":{"generated":16,"embedded":10},"embeddin
+[2025-12-22T20:58:26.657Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 1/24 files","files":{"queued":24,"processed":1,"failed":0},"bytesProcessed":23406,"chunks":{"generated":16,"embedded":10},"embeddin
+[2025-12-22T20:58:27.052Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 2/24 files","files":{"queued":24,"processed":2,"failed":0},"bytesProcessed":23767,"chunks":{"generated":34,"embedded":20},"embeddin

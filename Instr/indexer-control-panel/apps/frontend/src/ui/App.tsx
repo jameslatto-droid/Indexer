@@ -661,17 +661,22 @@ function SearchRoute() {
 
   const runReason = async () => {
     const ids = pinned.size > 0 ? Array.from(pinned) : Array.from(selected);
+    console.log('[runReason] Starting with', ids.length, 'chunks');
     setReasoningLoading(true); setError(null);
     try {
+      console.log('[runReason] Sending request to', `${API}/api/reason`);
       const res = await fetch(`${API}/api/reason`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: query || "What are the key points?", chunkIds: ids, profile: "answer_strict", model: "llama3.2:latest", stream: false })
+        body: JSON.stringify({ question: query || "What are the key points?", chunkIds: ids, profile: "answer_strict", model: "llama3.1:8b-instruct-q4_K_M", stream: false })
       });
+      console.log('[runReason] Response status:', res.status);
       const data = await res.json();
+      console.log('[runReason] Response data:', data);
       setReasoning({ answer: data.answer, citations: data.citations || [], notes: data.notes });
       if (!res.ok) setError("Reasoning returned an error");
     } catch (e: any) {
+      console.error('[runReason] Error:', e);
       setError(e?.message || "Reasoning failed");
     } finally {
       setReasoningLoading(false);
@@ -694,7 +699,16 @@ function SearchRoute() {
           <option value="hybrid">Hybrid</option>
         </select>
         <button className="btn" onClick={runSearch} disabled={loading}>{loading ? "Searching…" : "Search"}</button>
-        <button className="btn" onClick={runReason} disabled={reasoningLoading || (selected.size === 0 && pinned.size === 0)}>Generate Answer</button>
+        <button 
+          className="btn" 
+          onClick={() => {
+            console.log('[Button Click] selected.size:', selected.size, 'pinned.size:', pinned.size, 'reasoningLoading:', reasoningLoading);
+            runReason();
+          }} 
+          disabled={reasoningLoading || (selected.size === 0 && pinned.size === 0)}
+        >
+          Generate Answer
+        </button>
       </div>
 
       {error && <div className="px-4 py-2 text-sm text-amber-400">{error}</div>}
@@ -714,7 +728,7 @@ function SearchRoute() {
           <div className="col-span-2 border-r border-slate-800 p-4 space-y-3 overflow-auto">
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold">Answer</div>
-              <div className="text-xs text-slate-400">Model: llama3.2 (mock)</div>
+              <div className="text-xs text-slate-400">Model: llama3.1:8b-instruct-q4_K_M</div>
             </div>
             <div className="min-h-[180px] bg-slate-900/40 border border-slate-800 rounded p-3 text-sm whitespace-pre-wrap">
               {reasoningLoading ? "Generating…" : (reasoning?.answer ?? "Run reasoning to see an answer with citations.")}

@@ -6,7 +6,6 @@ import path from "node:path";
 import os from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { Ollama } from "ollama";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,9 +33,9 @@ const STATE = {
   }
 };
 
-// --- Index & Ollama Setup ---
+// --- Index Setup ---
 const INDEX_DIR = "E:/AIIndex";
-const ollama = new Ollama({ host: "http://127.0.0.1:11434" });
+const REASONING_SERVICE = "http://127.0.0.1:8788";
 let indexData = null; // Will hold {config, embeddings: [{filePath, chunkIndex, embedding, text}]}
 const EMBEDDING_DEVICE = process.env.EMBEDDING_DEVICE || "cuda";
 
@@ -654,7 +653,6 @@ async function getQueryEmbedding(text) {
   const venvPython = path.join(__dirname, "..", "venv-gpu", "Scripts", "python.exe");
   const embeddingScript = path.join(__dirname, "embedding-service.py");
   try {
-    const { spawn } = require('child_process');
     return new Promise((resolve, reject) => {
       const service = spawn(venvPython, [embeddingScript, '--device', EMBEDDING_DEVICE]);
       let output = '';
@@ -829,25 +827,13 @@ fastify.post("/api/search", async (req, reply) => {
   }
 });
 
-// --- API: reason (Ollama-based RAG) ---
-const PROMPT_PROFILES = {
-  answer_strict: {
-    system: "You are a precise assistant. Answer the user's question based ONLY on the provided context chunks. Cite chunk IDs for every claim. If the context doesn't contain the answer, say \"Insufficient evidence.\"",
-    template: (question, chunks) => `Question: ${question}\n\nContext:\n${chunks.map((c, i) => `[${c.chunkId}] ${c.text}`).join("\n\n")}\n\nAnswer (cite chunk IDs):`
-  },
-  summarize: {
-    system: "You are a summarization assistant. Provide a concise summary of the given context.",
-    template: (question, chunks) => `Summarize the following content:\n\n${chunks.map(c => c.text).join("\n\n")}`
-  }
-};
-
+// --- API: reason (proxies to reasoning service) ---
 fastify.post("/api/reason", async (req, reply) => {
   const body = req.body || {};
   const question = body.question || "What are the key points?";
   const chunkIds = Array.isArray(body.chunkIds) ? body.chunkIds : [];
   const profile = body.profile || "answer_strict";
   const model = body.model || "llama3.1:8b-instruct-q4_K_M";
-  const stream = body.stream ?? false;
 
   if (!indexData || !indexData.embeddings) {
     return reply.code(500).send({ error: "No index loaded" });
@@ -861,8 +847,18 @@ fastify.post("/api/reason", async (req, reply) => {
     };
   }
 
-  // Find chunks
-  const chunks = chunkIds.map(id => indexData.embeddings.find(e => `chunk_${e.filePath}_${e.chunkIndex}` === id)).filter(Boolean);
+  // Find chunks and format for reasoning service
+  const chunks = chunkIds.map(id => {
+    const item = indexData.embeddings.find(e => `chunk_${e.filePath}_${e.chunkIndex}` === id);
+    if (!item) return null;
+    return {
+      chunkId: id,
+      path: item.filePath,
+      section: `Chunk ${item.chunkIndex}`,
+      text: item.text || ""
+    };
+  }).filter(Boolean);
+
   if (chunks.length === 0) {
     return {
       answer: "Selected chunks not found in index.",
@@ -871,34 +867,22 @@ fastify.post("/api/reason", async (req, reply) => {
     };
   }
 
-  // Build prompt
-  const promptConfig = PROMPT_PROFILES[profile] || PROMPT_PROFILES.answer_strict;
-  const prompt = promptConfig.template(question, chunks);
-
   try {
-    const response = await ollama.generate({
-      model,
-      prompt,
-      system: promptConfig.system,
-      stream: false
+    // Call reasoning service
+    const response = await fetch(`${REASONING_SERVICE}/reason`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, chunks, profile, model })
     });
 
-    const answer = response.response || "(No response from model)";
-    const citations = chunks.slice(0, 5).map(c => ({
-      chunkId: `chunk_${c.filePath}_${c.chunkIndex}`,
-      path: c.filePath,
-      section: `Chunk ${c.chunkIndex}`,
-      quote: (c.text || "").slice(0, 100)
-    }));
+    if (!response.ok) {
+      throw new Error(`Reasoning service returned ${response.status}`);
+    }
 
-    return {
-      answer,
-      citations,
-      notes: [`Used ${chunks.length} chunks`, `Model: ${model}`, `Profile: ${profile}`]
-    };
+    return await response.json();
   } catch (err) {
-    req.log.error("Ollama error:", err);
-    return reply.code(500).send({ error: "Ollama request failed", details: err.message });
+    req.log.error("Reasoning service error:", err);
+    return reply.code(500).send({ error: "Reasoning failed", details: err.message });
   }
 });
 
@@ -908,7 +892,7 @@ fastify.get("/ws", { websocket: true }, (connection, req) => {
   send({ type: "hello", payload: { ok: true, ts: new Date().toISOString() } });
 });
 
-// --- WebSocket: reasoning stream (Ollama streaming) ---
+// --- WebSocket: reasoning stream (proxies to reasoning service) ---
 fastify.get("/ws_reason", { websocket: true }, (connection, req) => {
   const send = (msg) => connection.socket.send(JSON.stringify(msg));
   
@@ -933,45 +917,63 @@ fastify.get("/ws_reason", { websocket: true }, (connection, req) => {
         return;
       }
 
-      // Find chunks
-      const chunks = chunkIds.map(id => indexData.embeddings.find(e => `chunk_${e.filePath}_${e.chunkIndex}` === id)).filter(Boolean);
+      // Find chunks and format for reasoning service
+      const chunks = chunkIds.map(id => {
+        const item = indexData.embeddings.find(e => `chunk_${e.filePath}_${e.chunkIndex}` === id);
+        if (!item) return null;
+        return {
+          chunkId: id,
+          path: item.filePath,
+          section: `Chunk ${item.chunkIndex}`,
+          text: item.text || ""
+        };
+      }).filter(Boolean);
+
       if (chunks.length === 0) {
         send({ type: "reason_token", payload: { text: "Selected chunks not found." } });
         send({ type: "reason_done", payload: { answer: "Selected chunks not found.", citations: [] } });
         return;
       }
 
-      // Build prompt
-      const promptConfig = PROMPT_PROFILES[profile] || PROMPT_PROFILES.answer_strict;
-      const prompt = promptConfig.template(question, chunks);
-
       try {
-        const stream = await ollama.generate({
-          model,
-          prompt,
-          system: promptConfig.system,
-          stream: true
+        // Call reasoning service streaming endpoint
+        const response = await fetch(`${REASONING_SERVICE}/reason/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question, chunks, profile, model })
         });
 
-        let fullAnswer = "";
-        for await (const part of stream) {
-          if (part.response) {
-            fullAnswer += part.response;
-            send({ type: "reason_token", payload: { text: part.response } });
-          }
+        if (!response.ok) {
+          throw new Error(`Reasoning service returned ${response.status}`);
         }
 
-        const citations = chunks.slice(0, 5).map(c => ({
-          chunkId: `chunk_${c.filePath}_${c.chunkIndex}`,
-          path: c.filePath,
-          section: `Chunk ${c.chunkIndex}`,
-          quote: (c.text || "").slice(0, 100)
-        }));
+        // Stream response back to WebSocket
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-        send({ type: "reason_done", payload: { answer: fullAnswer, citations } });
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = decoder.decode(value);
+          const lines = text.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const json = JSON.parse(line.slice(6));
+              if (json.type === "token") {
+                send({ type: "reason_token", payload: { text: json.text } });
+              } else if (json.type === "done") {
+                send({ type: "reason_done", payload: { answer: json.answer, citations: json.citations } });
+              } else if (json.type === "error") {
+                send({ type: "reason_error", payload: { error: json.message } });
+              }
+            }
+          }
+        }
       } catch (err) {
-        console.error("Ollama streaming error:", err);
-        send({ type: "reason_error", payload: { error: "Ollama request failed", details: err.message } });
+        console.error("Reasoning service streaming error:", err);
+        send({ type: "reason_error", payload: { error: "Reasoning failed", details: err.message } });
       }
     }
   });

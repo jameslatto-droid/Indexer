@@ -1,19 +1,16 @@
 {
-  "name": "indexer-control-backend",
+  "name": "indexer-backend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.mjs",
-    "dev:reasoning": "node --watch src/reasoning-service.mjs",
-    "start": "node src/server.mjs",
-    "start:reasoning": "node src/reasoning-service.mjs"
+    "start": "node src/server.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^8.5.0",
     "@fastify/websocket": "^8.3.1",
     "fastify": "^4.28.1",
-    "ollama": "^0.6.3",
     "zod": "^3.23.8"
   }
 }

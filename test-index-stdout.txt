@@ -1,0 +1,64 @@
+[test] spawned indexer worker, waiting for ready...
+[2025-12-22T20:59:57.794Z] [worker message] {"type":"ready"}
+[test] worker ready, sending start command
+[worker stdout] [initEmbeddingService] pythonScript: E:\Git\Indexing\Instr\indexer-control-panel\apps\backend\src\embedding-service.py
+[worker stdout] [initEmbeddingService] PYTHON_EXE: E:\Git\Indexing\Instr\indexer-control-panel\apps\backend\venv-gpu\Scripts\python.exe
+[worker stdout] [initEmbeddingService] spawned process pid: 14060
+[worker stdout] [embedding service stderr RAW] "{\"type\": \"ready\", \"model\": \"all-MiniLM-L6-v2\", \"device\": \"cpu\"}\r\n"
+[worker stdout] [embedding service stderr PARSED] {"type": "ready", "model": "all-MiniLM-L6-v2", "device": "cpu"}
+[worker stdout] [embedding service stderr RAW] "{\"type\": \"loaded\", \"device\": \"cpu\"}\r\n"
+[embedding service stderr PARSED] {"type": "loaded", "device": "cpu"}
+[2025-12-22T21:00:10.322Z] [worker message] {"type":"log","message":"GPU embedding service initialized"}
+[worker stdout] [embedding service] received "loaded" message, resolving
+[indexer] derived roots: [ 'E:/Git/Indexing/Instr/indexer-control-panel/' ]
+[indexer] scanning root: E:/Git/Indexing/Instr/indexer-control-panel/
+[worker stdout] [indexer] total files collected: 24
+[2025-12-22T21:00:10.325Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 0/24 files","files":{"queued":24,"processed":0,"failed":0},"bytesProcessed":0,"chunks":{"generated":0,"embedded":0},"embeddingsPend
+[2025-12-22T21:00:10.821Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 1/24 files","files":{"queued":24,"processed":1,"failed":0},"bytesProcessed":23406,"chunks":{"generated":33,"embedded":10},"embeddin
+[2025-12-22T21:00:10.823Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 1/24 files","files":{"queued":24,"processed":1,"failed":0},"bytesProcessed":23406,"chunks":{"generated":33,"embedded":10},"embeddin
+[2025-12-22T21:00:11.307Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 2/24 files","files":{"queued":24,"processed":2,"failed":0},"bytesProcessed":23767,"chunks":{"generated":51,"embedded":20},"embeddin
+[2025-12-22T21:00:11.686Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 3/24 files","files":{"queued":24,"processed":3,"failed":0},"bytesProcessed":24143,"chunks":{"generated":55,"embedded":30},"embeddin
+[2025-12-22T21:00:12.044Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 4/24 files","files":{"queued":24,"processed":4,"failed":0},"bytesProcessed":28217,"chunks":{"generated":60,"embedded":40},"embeddin
+[2025-12-22T21:00:12.383Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 5/24 files","files":{"queued":24,"processed":5,"failed":0},"bytesProcessed":47272,"chunks":{"generated":75,"embedded":50},"embeddin
+[2025-12-22T21:00:12.793Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 6/24 files","files":{"queued":24,"processed":6,"failed":0},"bytesProcessed":79020,"chunks":{"generated":105,"embedded":60},"embeddi
+[2025-12-22T21:00:13.159Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 7/24 files","files":{"queued":24,"processed":7,"failed":0},"bytesProcessed":79364,"chunks":{"generated":129,"embedded":70},"embeddi
+[2025-12-22T21:00:13.594Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 8/24 files","files":{"queued":24,"processed":8,"failed":0},"bytesProcessed":171429,"chunks":{"generated":148,"embedded":80},"embedd
+[2025-12-22T21:00:14.045Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 9/24 files","files":{"queued":24,"processed":9,"failed":0},"bytesProcessed":172128,"chunks":{"generated":156,"embedded":90},"embedd
+[2025-12-22T21:00:14.570Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 10/24 files","files":{"queued":24,"processed":10,"failed":0},"bytesProcessed":172208,"chunks":{"generated":171,"embedded":100},"emb
+[2025-12-22T21:00:15.090Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 11/24 files","files":{"queued":24,"processed":11,"failed":0},"bytesProcessed":172448,"chunks":{"generated":191,"embedded":110},"emb
+[2025-12-22T21:00:15.534Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 12/24 files","files":{"queued":24,"processed":12,"failed":0},"bytesProcessed":172565,"chunks":{"generated":206,"embedded":120},"emb
+[2025-12-22T21:00:15.932Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 13/24 files","files":{"queued":24,"processed":13,"failed":0},"bytesProcessed":206332,"chunks":{"generated":237,"embedded":130},"emb
+[2025-12-22T21:00:16.245Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 14/24 files","files":{"queued":24,"processed":14,"failed":0},"bytesProcessed":206698,"chunks":{"generated":260,"embedded":140},"emb
+[2025-12-22T21:00:16.515Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 15/24 files","files":{"queued":24,"processed":15,"failed":0},"bytesProcessed":206860,"chunks":{"generated":284,"embedded":150},"emb
+[2025-12-22T21:00:16.779Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 16/24 files","files":{"queued":24,"processed":16,"failed":0},"bytesProcessed":207228,"chunks":{"generated":292,"embedded":160},"emb
+[2025-12-22T21:00:16.976Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 17/24 files","files":{"queued":24,"processed":17,"failed":0},"bytesProcessed":207414,"chunks":{"generated":302,"embedded":170},"emb
+[2025-12-22T21:00:17.364Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 18/24 files","files":{"queued":24,"processed":18,"failed":0},"bytesProcessed":211443,"chunks":{"generated":325,"embedded":180},"emb
+[2025-12-22T21:00:17.550Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 19/24 files","files":{"queued":24,"processed":19,"failed":0},"bytesProcessed":214717,"chunks":{"generated":346,"embedded":190},"emb
+[2025-12-22T21:00:17.755Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 20/24 files","files":{"queued":24,"processed":20,"failed":0},"bytesProcessed":216774,"chunks":{"generated":370,"embedded":200},"emb
+[2025-12-22T21:00:18.129Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 21/24 files","files":{"queued":24,"processed":21,"failed":0},"bytesProcessed":230369,"chunks":{"generated":385,"embedded":210},"emb
+[2025-12-22T21:00:18.591Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 22/24 files","files":{"queued":24,"processed":22,"failed":0},"bytesProcessed":235849,"chunks":{"generated":396,"embedded":220},"emb
+[2025-12-22T21:00:19.114Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 23/24 files","files":{"queued":24,"processed":23,"failed":0},"bytesProcessed":236413,"chunks":{"generated":420,"embedded":230},"emb
+[2025-12-22T21:00:19.477Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":240},"emb
+[2025-12-22T21:00:19.500Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":250},"emb
+[2025-12-22T21:00:19.520Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":260},"emb
+[2025-12-22T21:00:19.545Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":270},"emb
+[2025-12-22T21:00:19.570Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":280},"emb
+[2025-12-22T21:00:19.594Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":290},"emb
+[2025-12-22T21:00:19.617Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":300},"emb
+[2025-12-22T21:00:19.641Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":310},"emb
+[2025-12-22T21:00:19.665Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":320},"emb
+[2025-12-22T21:00:19.695Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":330},"emb
+[2025-12-22T21:00:19.722Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":340},"emb
+[2025-12-22T21:00:19.750Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":350},"emb
+[2025-12-22T21:00:19.771Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":360},"emb
+[2025-12-22T21:00:19.792Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":370},"emb
+[2025-12-22T21:00:19.818Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":380},"emb
+[2025-12-22T21:00:19.843Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":390},"emb
+[2025-12-22T21:00:19.865Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":400},"emb
+[2025-12-22T21:00:19.884Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":410},"emb
+[2025-12-22T21:00:19.904Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":420},"emb
+[2025-12-22T21:00:19.927Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":430},"emb
+[2025-12-22T21:00:19.941Z] [worker message] {"type":"stats","payload":{"state":"embedding","message":"Processing 24/24 files","files":{"queued":24,"processed":24,"failed":0},"bytesProcessed":237918,"chunks":{"generated":434,"embedded":434},"emb
+[2025-12-22T21:00:19.967Z] [worker message] {"type":"log","message":"Index saved to E:\\AIIndex\\index_2025-12-22T21-00-19-942Z"}
+[2025-12-22T21:00:19.968Z] [worker message] {"type":"complete","payload":{"filesProcessed":24,"filesFailed":0,"chunksEmbedded":434,"bytesProcessed":237918,"durationSec":22}}
+[test] indexing done or failed
